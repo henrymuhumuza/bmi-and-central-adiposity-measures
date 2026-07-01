@@ -51,7 +51,7 @@ analysis <- master |>
       TRUE ~ NA_character_
     ),
     any_anthropometry = !is.na(bmi) | !is.na(waist_cm) | !is.na(waist_hip_ratio),
-    any_outcome = rowSums(!is.na(dplyr::pick(dplyr::all_of(names(outcome_variables))))) > 0,
+    any_outcome = rowSums(!is.na(dplyr::pick(hypertension, diabetes, ckd))) > 0,
     analytic_eligible = age >= 20 & any_anthropometry & any_outcome
   ) |>
   dplyr::filter(analytic_eligible) |>

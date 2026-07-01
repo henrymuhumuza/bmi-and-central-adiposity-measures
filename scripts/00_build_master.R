@@ -199,11 +199,14 @@ master <- components$demo_l |>
   ) |>
   dplyr::mutate(
     cardiometabolic_count_available = rowSums(!is.na(dplyr::pick(hypertension, diabetes, ckd))),
+    cardiometabolic_count_present = rowSums(dplyr::pick(hypertension, diabetes, ckd), na.rm = TRUE),
+    cardiometabolic_count_absent = rowSums(dplyr::pick(hypertension, diabetes, ckd) == 0, na.rm = TRUE),
     cardiometabolic_missing_count = 3L - cardiometabolic_count_available,
-    cardiometabolic_multimorbidity = dplyr::if_else(
-      cardiometabolic_count_available > 0,
-      as.integer(rowSums(dplyr::pick(hypertension, diabetes, ckd), na.rm = TRUE) >= 2),
-      NA_integer_
+    cardiometabolic_multimorbidity = dplyr::case_when(
+      cardiometabolic_count_present >= 2 ~ 1L,
+      cardiometabolic_count_available == 3 & cardiometabolic_count_present < 2 ~ 0L,
+      cardiometabolic_count_present == 0 & cardiometabolic_count_absent >= 2 ~ 0L,
+      TRUE ~ NA_integer_
     )
   ) |>
   dplyr::filter(age >= 20) |>

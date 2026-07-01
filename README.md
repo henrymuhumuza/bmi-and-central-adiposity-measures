@@ -60,4 +60,6 @@ The rendered HTML manuscript is written under `outputs/manuscript/`.
 
 - Primary inference uses survey-weighted logistic regression with `wtmec2yr`, `sdmvpsu`, and `sdmvstra`.
 - ROC/AUC analyses are secondary predictive discrimination analyses and are labeled as unweighted.
+- Hypertension, diabetes, and CKD are coded as present if any defining criterion is positive, absent if no criterion is positive and at least one defining source is available, and missing only when all defining sources for that outcome are unavailable.
+- Cardiometabolic multimorbidity is derived from hypertension, diabetes, and CKD using explicit certainty rules rather than treating partial component information as a definite negative.
 - Generated participant-level data files are intentionally excluded from version control.
