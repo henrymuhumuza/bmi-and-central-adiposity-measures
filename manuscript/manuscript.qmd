@@ -241,6 +241,31 @@ The outcomes were hypertension, diabetes, CKD, and cardiometabolic multimorbidit
 
 For each component outcome, participants were classified as having the condition if any defining criterion was positive, as not having the condition if no criterion was positive and at least one defining data source was available, and as missing only when all defining data sources for that outcome were unavailable. Cardiometabolic multimorbidity was classified as present when at least two component outcomes were present and as absent when available component outcomes were sufficient to rule out two or more conditions; otherwise it was treated as missing. Analytic eligibility required at least one non-missing primary component outcome among hypertension, diabetes, and CKD.
 
+```{r}
+#| label: tbl-outcome-classification
+#| tbl-cap: "Outcome classification rules for yes, no, and missing values."
+tibble::tribble(
+  ~Outcome, ~`Classified yes when`, ~`Classified no when`, ~`Classified missing or caveat`,
+  "Hypertension",
+  "Mean systolic blood pressure at least 140 mmHg, mean diastolic blood pressure at least 90 mmHg, self-reported hypertension, or antihypertensive medication use.",
+  "No defining criterion was positive and at least one hypertension-defining source was available.",
+  "All hypertension-defining sources were unavailable.",
+  "Diabetes",
+  "Self-reported physician diagnosis, HbA1c at least 6.5%, insulin use, or diabetes medication use.",
+  "No defining criterion was positive and at least one diabetes-defining source was available.",
+  "All diabetes-defining sources were unavailable.",
+  "Chronic kidney disease",
+  "Estimated glomerular filtration rate below 60 mL/min/1.73 mÂ² or urine albumin-creatinine ratio at least 30 mg/g.",
+  "Neither defining criterion was positive and at least one kidney marker was available.",
+  "Both kidney markers were unavailable. A more conservative alternative would classify CKD as no only when both eGFR and urine albumin-creatinine ratio are available and normal; this would increase CKD-specific missingness but was not used in the primary analysis.",
+  "Cardiometabolic multimorbidity",
+  "At least two of hypertension, diabetes, and CKD were present.",
+  "Available component outcomes were sufficient to rule out two or more of hypertension, diabetes, and CKD.",
+  "Available component outcomes were insufficient to determine whether at least two conditions were present."
+) |>
+  kable()
+```
+
 ## Statistical Analysis
 
 Weighted baseline characteristics were summarized using the NHANES MEC examination weight (`wtmec2yr`), masked variance strata (`sdmvstra`), and primary sampling units (`sdmvpsu`). Continuous variables are presented as weighted means with standard errors and weighted medians with interquartile ranges where available. Categorical variables are presented as weighted percentages with standard errors.
