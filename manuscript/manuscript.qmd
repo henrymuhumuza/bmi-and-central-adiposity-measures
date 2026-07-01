@@ -1,0 +1,452 @@
+---
+title: "Central Obesity Versus Body Mass Index for Predicting Cardiometabolic Disease: A Cross-sectional Analysis of NHANES August 2021-August 2023"
+author:
+  - name: "Henry Muhumuza"
+    affiliation: "Makerere University, Kampala, Uganda"
+format:
+  html:
+    toc: true
+    toc-depth: 3
+    number-sections: true
+    theme: cosmo
+    embed-resources: true
+bibliography: ../references/references.bib
+csl: ../references/vancouver.csl
+execute:
+  echo: false
+  warning: false
+  message: false
+---
+
+```{r setup}
+library(readr)
+library(dplyr)
+library(knitr)
+library(ggplot2)
+
+read_required <- function(path) {
+  if (!file.exists(path)) stop("Required analysis output is missing: ", path, call. = FALSE)
+  read_csv(path, show_col_types = FALSE)
+}
+
+fmt <- function(x, digits = 1) sprintf(paste0("%.", digits, "f"), x)
+fmt2 <- function(x) sprintf("%.2f", x)
+fmt3 <- function(x) sprintf("%.3f", x)
+fmt_ci <- function(est, lo, hi, digits = 2) {
+  paste0(sprintf(paste0("%.", digits, "f"), est), " (95% CI ",
+         sprintf(paste0("%.", digits, "f"), lo), "-", sprintf(paste0("%.", digits, "f"), hi), ")")
+}
+fmt_auc <- function(est, lo, hi) fmt_ci(est, lo, hi, digits = 3)
+fmt_p <- function(x) ifelse(is.na(x), "", ifelse(x < 0.001, "<0.001", sprintf("%.3f", x)))
+
+table1 <- read_required("../tables/table_1_weighted_baseline_characteristics.csv")
+table2 <- read_required("../tables/table_2_outcome_prevalence_by_anthropometric_categories.csv")
+table3 <- read_required("../tables/table_3_survey_weighted_adjusted_associations.csv")
+table4 <- read_required("../tables/table_4_predictive_performance.csv")
+correlations <- read_required("../results/anthropometric_spearman_correlations.csv")
+age_prev <- read_required("../results/outcome_prevalence_by_age_group.csv")
+missingness <- read_required("../tables/supplementary_table_2_missingness.csv")
+definitions <- read_required("../tables/supplementary_table_1_variable_definitions.csv")
+sensitivity <- read_required("../tables/supplementary_table_4_sensitivity_analyses.csv")
+
+analysis_data <- readRDS("../data/processed/analysis_dataset.rds")
+analytic_n <- nrow(analysis_data)
+master_n <- nrow(readRDS("../data/processed/nhanes_master.rds"))
+
+t1 <- function(characteristic, level = NA_character_) {
+  target_characteristic <- gsub("²", "^2", characteristic)
+  out <- table1 |>
+    mutate(characteristic_lookup = gsub("²", "^2", .data$characteristic)) |>
+    filter(.data$characteristic_lookup == .env$target_characteristic)
+  if (!is.na(level)) out <- filter(out, .data$level == .env$level)
+  out$estimate[1]
+}
+
+prev <- function(category_type, category, outcome) {
+  table2 |>
+    filter(
+      .data$category_type == .env$category_type,
+      .data$category == .env$category,
+      .data$outcome == .env$outcome
+    ) |>
+    transmute(value = paste0(fmt(prevalence_percent), "%")) |>
+    pull(value) |>
+    first()
+}
+
+or_text <- function(outcome, predictor) {
+  table3 |>
+    filter(.data$outcome == .env$outcome, .data$predictor == .env$predictor) |>
+    transmute(value = fmt_ci(odds_ratio, conf_low, conf_high, 2)) |>
+    pull(value) |>
+    first()
+}
+
+auc_text <- function(outcome, predictor, model_type) {
+  table4 |>
+    filter(
+      .data$outcome == .env$outcome,
+      .data$predictor == .env$predictor,
+      .data$model_type == .env$model_type
+    ) |>
+    transmute(value = fmt_auc(auc, conf_low, conf_high)) |>
+    pull(value) |>
+    first()
+}
+
+best_auc <- table4 |>
+  group_by(outcome, model_type) |>
+  slice_max(auc, n = 1, with_ties = FALSE) |>
+  ungroup() |>
+  mutate(auc_ci = fmt_auc(auc, conf_low, conf_high)) |>
+  select(outcome, model_type, predictor, auc_ci)
+
+table1_display <- table1 |>
+  rename(Characteristic = characteristic, Level = level, `Weighted estimate` = estimate, `Median (IQR)` = median_iqr) |>
+  mutate(across(everything(), ~ifelse(is.na(.x), "", as.character(.x)))) |>
+  mutate(across(everything(), ~gsub("kg/m\\^2", "kg/m²", .x)))
+
+table2_display <- table2 |>
+  mutate(
+    `Prevalence, % (SE)` = paste0(fmt(prevalence_percent), " (", fmt(se_percent), ")")
+  ) |>
+  select(`Category set` = category_type, Category = category, Outcome = outcome, `Prevalence, % (SE)`) |>
+  mutate(across(everything(), as.character))
+
+table3_display <- table3 |>
+  mutate(
+    `Adjusted OR (95% CI)` = fmt_ci(odds_ratio, conf_low, conf_high, 2),
+    `P value` = p_value_formatted
+  ) |>
+  select(Outcome = outcome, Predictor = predictor, Increment = increment, N = n, Events = events, `Adjusted OR (95% CI)`, `P value`) |>
+  mutate(across(where(is.character), ~gsub("kg/m\\^2", "kg/m²", .x)))
+
+table4_display <- table4 |>
+  mutate(
+    `AUC (95% CI)` = fmt_auc(auc, conf_low, conf_high),
+    AIC = fmt(aic, 1),
+    BIC = fmt(bic, 1)
+  ) |>
+  select(Outcome = outcome, Predictor = predictor, Model = model_type, N = n, Events = events, `AUC (95% CI)`, AIC, BIC)
+
+missingness_display <- missingness |>
+  mutate(`Missing, %` = fmt(percent_missing, 1)) |>
+  mutate(
+    variable = recode(
+      variable,
+      age = "Age",
+      sex = "Sex",
+      race_ethnicity = "Race and ethnicity",
+      education = "Education",
+      pir = "Poverty-income ratio",
+      bmi = "Body mass index",
+      waist_cm = "Waist circumference",
+      hip_cm = "Hip circumference",
+      waist_hip_ratio = "Waist-hip ratio",
+      hypertension = "Hypertension",
+      diabetes = "Diabetes",
+      ckd = "Chronic kidney disease",
+      cardiometabolic_multimorbidity = "Cardiometabolic multimorbidity"
+    )
+  ) |>
+  select(Variable = variable, `Non-missing` = n_nonmissing, Missing = n_missing, `Missing, %`)
+
+definitions_display <- definitions |>
+  rename(Variable = variable, Definition = definition) |>
+  mutate(
+    Variable = recode(
+      Variable,
+      bmi = "Body mass index",
+      waist_cm = "Waist circumference",
+      waist_hip_ratio = "Waist-hip ratio",
+      hypertension = "Hypertension",
+      diabetes = "Diabetes",
+      ckd = "Chronic kidney disease",
+      cardiometabolic_multimorbidity = "Cardiometabolic multimorbidity",
+      bmi_category = "BMI category",
+      waist_category = "Waist circumference category",
+      whr_category = "Waist-hip ratio category"
+    )
+  ) |>
+  mutate(across(where(is.character), ~gsub("kg/m\\^2", "kg/m²", .x)))
+
+sensitivity_display <- sensitivity |>
+  mutate(
+    `Adjusted OR (95% CI)` = fmt_ci(odds_ratio, conf_low, conf_high, 2),
+    `P value` = fmt_p(p_value)
+  ) |>
+  select(
+    Sensitivity = sensitivity,
+    Stratum = stratum,
+    Outcome = outcome,
+    Predictor = predictor,
+    Increment = increment,
+    N = n,
+    Events = events,
+    `Adjusted OR (95% CI)`,
+    `P value`
+  ) |>
+  mutate(across(where(is.character), ~gsub("kg/m\\^2", "kg/m²", .x)))
+```
+
+# Abstract
+
+**Background:** Body mass index (BMI) is widely used to classify obesity, but it does not directly capture abdominal fat distribution. Waist circumference and waist-hip ratio may better reflect central adiposity and cardiometabolic risk.
+
+**Objective:** To compare BMI, waist circumference, and waist-hip ratio for identifying hypertension, diabetes, chronic kidney disease (CKD), and cardiometabolic multimorbidity among US adults.
+
+**Methods:** We conducted a cross-sectional analysis of NHANES August 2021-August 2023 among adults aged 20 years or older. After exclusions, `r analytic_n` adults were included. Survey-weighted logistic regression models estimated adjusted odds ratios (ORs) per 5 kg/m² higher BMI, 10 cm higher waist circumference, and 0.1 unit higher waist-hip ratio, adjusting for age, sex, race and ethnicity, education, and poverty-income ratio. ROC/AUC analyses were secondary.
+
+**Results:** Obesity was present in `r t1("BMI category", "Obesity")` of adults. Weighted prevalences were `r t1("Hypertension", "Present")` for hypertension, `r t1("Diabetes", "Present")` for diabetes, `r t1("Chronic kidney disease", "Present")` for CKD, and `r t1("Cardiometabolic multimorbidity", "Present")` for cardiometabolic multimorbidity. BMI, waist circumference, and waist-hip ratio were positively associated with hypertension, diabetes, and multimorbidity after adjustment. Waist-hip ratio showed the largest adjusted ORs for diabetes (`r or_text("Diabetes", "Waist-hip ratio")`) and multimorbidity (`r or_text("Cardiometabolic multimorbidity", "Waist-hip ratio")`). In anthropometric-only ROC analyses, waist-hip ratio had the highest AUC for all outcomes; after adjustment, AUC differences among measures were smaller and outcome-specific.
+
+**Conclusions:** In contemporary NHANES data, central adiposity measures, particularly waist-hip ratio in anthropometric-only models, discriminated prevalent cardiometabolic disease at least as well as BMI and often better. After adjustment, all three measures remained informative, with no single measure uniformly dominant. These findings support measuring central adiposity alongside BMI while recognizing the cross-sectional design.
+
+**Keywords:** NHANES; body mass index; waist circumference; waist-hip ratio; hypertension; diabetes; chronic kidney disease; cardiometabolic multimorbidity
+
+# Introduction
+
+Obesity is a central determinant of cardiometabolic health, but the choice of anthropometric measure shapes both clinical classification and epidemiologic inference. Excess adiposity is associated with a broad burden of chronic disease, including type 2 diabetes, cardiovascular disease, and other adverse health outcomes.[@whoObesity; @dixon2010] BMI is simple, reproducible, and widely used in surveillance and practice; however, it is an indirect index of body size rather than a direct measure of adipose tissue distribution. Individuals with the same BMI may differ substantially in abdominal adiposity, lean mass, metabolic risk, and disease burden. This limitation is especially relevant for hypertension, diabetes, CKD, and multimorbidity, which are closely related to visceral adiposity, insulin resistance, vascular dysfunction, inflammation, and renal injury.[@janssen2004; @chait2020]
+
+Waist circumference and waist-hip ratio are practical markers of central adiposity. Waist circumference captures abdominal size, while waist-hip ratio reflects abdominal adiposity relative to gluteofemoral body size. Prior studies and reviews suggest that central adiposity measures may identify cardiometabolic risk as well as, or better than, BMI in some populations.[@lean1995; @huxley2010; @ashwell2012] Yet comparative performance can differ by outcome, age, sex, ethnicity, and the degree of covariate adjustment.[@huxley2010] It is therefore useful to compare these measures directly in contemporary nationally representative data.
+
+NHANES August 2021-August 2023 provides standardized interview, examination, and laboratory data from the US civilian non-institutionalized population.[@nchs2021protocol] We used these data to compare BMI, waist circumference, and waist-hip ratio for identifying adults with hypertension, diabetes, CKD, and cardiometabolic multimorbidity. We focused on two complementary dimensions: adjusted associations from survey-weighted regression and predictive discrimination from ROC/AUC analyses.
+
+# Methods
+
+## Study Design and Data Source
+
+This was a cross-sectional analytical study using NHANES August 2021-August 2023. NHANES uses a complex, multistage probability design and combines household interviews, standardized physical examinations, dietary assessment, and laboratory testing. Survey weights, strata, and primary sampling units were retained so that descriptive and regression estimates represent the US civilian non-institutionalized adult population.[@nhanesDesign]
+
+Public-use NHANES August 2021-August 2023 data files were obtained from the National Center for Health Statistics NHANES website in SAS transport (`.xpt`) format.[@nchs2021protocol] We downloaded the component files needed for this analysis, including demographic, examination, questionnaire, medication, and laboratory files. Files were imported into R and merged at the participant level using the NHANES respondent sequence number (`SEQN`), the unique participant identifier used across NHANES component files. The merged participant-level file was then restricted to the survey design variables, demographic and socioeconomic variables, anthropometric measures, medication and questionnaire variables, and laboratory measures required to define the study predictors, covariates, and outcomes. This harmonized file was saved as the project master dataset (`nhanes_master`) in CSV and RDS formats, with the original XPT files, merged raw file, and variable labels preserved for reproducibility.
+
+## Study Population
+
+Adults aged 20 years or older were eligible. We excluded participants only if they were missing all key anthropometric predictors or all cardiometabolic outcome data. The master dataset included `r master_n` adults, and the analytic dataset included `r analytic_n` adults. The derivation of the analytic sample is shown in @fig-flow. Outcome-specific models used complete cases for the relevant outcome, anthropometric predictor, covariates, and survey design variables; therefore, denominators differ across models and are reported in the tables.
+
+```{r}
+#| label: fig-flow
+#| fig-cap: "Study flow for the NHANES analytic sample."
+knitr::include_graphics("../figures/figure_1_study_flow.png")
+```
+
+## Anthropometric Predictors
+
+The primary predictors were BMI, waist circumference, and waist-hip ratio. BMI was calculated as weight in kilograms divided by height in meters squared. Waist circumference and hip circumference are simple tape-measure anthropometric measures of abdominal and gluteofemoral body size, respectively. The waist-hip ratio was calculated by dividing waist circumference by hip circumference using the same measurement units for both measures (WC/HC). For clinical and epidemiologic interpretation, the World Health Organization recommends measuring waist circumference at the midpoint between the lower margin of the last palpable rib and the top of the iliac crest, and measuring hip circumference across the broadest part of the buttocks with the tape parallel to the floor.[@whoWaistHip2008] In NHANES, the recorded waist and hip circumference values were obtained by trained examination staff using standardized NHANES body-measure protocols.[@nchsAnthropometry] Higher waist-hip ratio values indicate proportionally greater abdominal circumference relative to hip circumference. Continuous predictors were scaled to clinically interpretable increments: BMI per 5 kg/m², waist circumference per 10 cm, and waist-hip ratio per 0.1 unit.
+
+Categorical analyses used BMI categories of underweight, normal weight, overweight, and obesity according to National Heart, Lung, and Blood Institute guidance.[@nhlbiPracticalGuide] For central adiposity categories, high waist circumference was defined using National Heart, Lung, and Blood Institute sex-specific cutoffs of at least 102 cm in men and at least 88 cm in women, while high waist-hip ratio was defined using World Health Organization sex-specific cutoffs of at least 0.90 in men and at least 0.85 in women.[@nhlbiPracticalGuide; @whoWaistHip2008] This approach is consistent with clinical assessment frameworks that begin with BMI classification but use waist circumference and cardiometabolic risk factors to refine obesity-related health risk.[@aronne2002]
+
+## Outcomes
+
+The outcomes were hypertension, diabetes, CKD, and cardiometabolic multimorbidity. Hypertension was defined by mean systolic blood pressure at least 140 mmHg, mean diastolic blood pressure at least 90 mmHg, self-reported hypertension, or antihypertensive medication use. Diabetes was defined by self-reported physician diagnosis, HbA1c at least 6.5%, insulin use, or diabetes medication use. CKD was operationalized using single-visit NHANES kidney markers as estimated glomerular filtration rate below 60 mL/min/1.73 m² or urine albumin-creatinine ratio at least 30 mg/g, consistent with the eGFR and albuminuria thresholds used in KDIGO CKD classification.[@kdigo2024] Because NHANES does not provide repeat measurements at least 3 months apart, this outcome should be interpreted as prevalent reduced kidney function or albuminuria consistent with possible CKD rather than clinically confirmed chronic disease. Cardiometabolic multimorbidity was defined as at least two of hypertension, diabetes, and this marker-based CKD outcome.
+
+## Statistical Analysis
+
+Weighted baseline characteristics were summarized using the NHANES MEC examination weight (`wtmec2yr`), masked variance strata (`sdmvstra`), and primary sampling units (`sdmvpsu`). Continuous variables are presented as weighted means with standard errors and weighted medians with interquartile ranges where available. Categorical variables are presented as weighted percentages with standard errors.
+
+Spearman correlations described overlap among BMI, waist circumference, and waist-hip ratio. Outcome prevalence was estimated across anthropometric categories. For each outcome, separate survey-weighted logistic regression models were fit for BMI, waist circumference, and waist-hip ratio. Adjusted models included age, sex, race and ethnicity, education, and poverty-income ratio.
+
+Predictive discrimination was evaluated using conventional logistic regression and empirical ROC/AUC analyses for anthropometric-only and adjusted models. These analyses were treated as secondary because the primary inferential analyses were survey-weighted. Sensitivity analyses included sex-stratified models, age-stratified models, and models excluding underweight participants. Survey-weighted analyses were implemented using methods for complex survey samples.[@leveneSurvey] All analyses were performed using reproducible R scripts in the project repository.
+
+# Results
+
+## Study Population
+
+The weighted mean age was `r t1("Age, years")`, and the weighted sex distribution was `r t1("Sex", "Female")` female and `r t1("Sex", "Male")` male. The weighted racial and ethnic distribution was predominantly non-Hispanic White (`r t1("Race and ethnicity", "Non-Hispanic White")`), with representation from Mexican American, other Hispanic, non-Hispanic Black, non-Hispanic Asian, and other or multiracial groups. The weighted mean poverty-income ratio was `r t1("Poverty-income ratio")`. Weighted baseline characteristics are shown in @tbl-baseline.
+
+Anthropometric burden was substantial. Weighted mean BMI was `r t1("Body mass index, kg/m²")`, weighted mean waist circumference was `r t1("Waist circumference, cm")`, and weighted mean waist-hip ratio was `r t1("Waist-hip ratio")`. Obesity by BMI was present in `r t1("BMI category", "Obesity")` of adults, high waist circumference in `r t1("Waist circumference category", "High waist circumference")`, and high waist-hip ratio in `r t1("Waist-hip ratio category", "High waist-hip ratio")`. The distributions of BMI, waist circumference, and waist-hip ratio are shown in @fig-distributions.
+
+```{r}
+#| label: tbl-baseline
+#| tbl-cap: "Weighted baseline characteristics of the analytic study population."
+kable(table1_display)
+```
+
+```{r}
+#| label: fig-distributions
+#| fig-cap: "Distributions of BMI, waist circumference, and waist-hip ratio."
+knitr::include_graphics("../figures/figure_2_anthropometric_distributions.png")
+```
+
+## Correlation Among Anthropometric Measures
+
+BMI and waist circumference were strongly correlated (Spearman r = `r fmt2(correlations$spearman_r[correlations$measure_1 == "bmi" & correlations$measure_2 == "waist_cm"])`). Waist circumference and waist-hip ratio were moderately correlated (r = `r fmt2(correlations$spearman_r[correlations$measure_1 == "waist_cm" & correlations$measure_2 == "waist_hip_ratio"])`), while BMI and waist-hip ratio were less strongly correlated (r = `r fmt2(correlations$spearman_r[correlations$measure_1 == "bmi" & correlations$measure_2 == "waist_hip_ratio"])`). These patterns, shown in @fig-correlation, indicate that waist-hip ratio captures a dimension of body shape not fully represented by BMI.
+
+```{r}
+#| label: fig-correlation
+#| fig-cap: "Spearman correlation heatmap for anthropometric measures."
+knitr::include_graphics("../figures/figure_3_anthropometric_correlation_heatmap.png")
+```
+
+## Prevalence of Cardiometabolic Outcomes
+
+Weighted prevalences were `r t1("Hypertension", "Present")` for hypertension, `r t1("Diabetes", "Present")` for diabetes, `r t1("Chronic kidney disease", "Present")` for CKD, and `r t1("Cardiometabolic multimorbidity", "Present")` for cardiometabolic multimorbidity. Outcome prevalence across anthropometric categories is shown in @tbl-prevalence.
+
+Disease prevalence increased across anthropometric categories. Hypertension prevalence rose from `r prev("BMI category", "Normal weight", "Hypertension")` in normal-weight adults to `r prev("BMI category", "Obesity", "Hypertension")` in adults with obesity. Diabetes prevalence rose from `r prev("BMI category", "Normal weight", "Diabetes")` to `r prev("BMI category", "Obesity", "Diabetes")`, and cardiometabolic multimorbidity from `r prev("BMI category", "Normal weight", "Cardiometabolic multimorbidity")` to `r prev("BMI category", "Obesity", "Cardiometabolic multimorbidity")`.
+
+Central adiposity categories showed even sharper contrasts. Cardiometabolic multimorbidity was `r prev("Waist circumference category", "Below high-risk cutoff", "Cardiometabolic multimorbidity")` among adults below the high waist circumference cutoff and `r prev("Waist circumference category", "High waist circumference", "Cardiometabolic multimorbidity")` among those above it. For waist-hip ratio, multimorbidity was `r prev("Waist-hip ratio category", "Below high-risk cutoff", "Cardiometabolic multimorbidity")` below the high-risk cutoff and `r prev("Waist-hip ratio category", "High waist-hip ratio", "Cardiometabolic multimorbidity")` above it.
+
+```{r}
+#| label: tbl-prevalence
+#| tbl-cap: "Weighted prevalence of cardiometabolic outcomes by anthropometric categories."
+kable(table2_display)
+```
+
+Outcome prevalence also increased strongly with age, as shown in @fig-age. Cardiometabolic multimorbidity was `r fmt(age_prev$prevalence_percent[age_prev$age_group == "20-39" & age_prev$outcome == "Cardiometabolic multimorbidity"])`% at ages 20-39 years and `r fmt(age_prev$prevalence_percent[age_prev$age_group == ">=60" & age_prev$outcome == "Cardiometabolic multimorbidity"])`% at ages 60 years or older.
+
+```{r}
+#| label: fig-age
+#| fig-cap: "Weighted cardiometabolic outcome prevalence by age group."
+knitr::include_graphics("../figures/figure_9_outcome_prevalence_by_age_group.png")
+```
+
+## Adjusted Associations
+
+All three anthropometric measures were positively associated with hypertension, diabetes, and cardiometabolic multimorbidity after adjustment for age, sex, race and ethnicity, education, and poverty-income ratio; adjusted associations are summarized in @tbl-associations. For hypertension, adjusted ORs were `r or_text("Hypertension", "Body mass index")` per 5 kg/m² higher BMI, `r or_text("Hypertension", "Waist circumference")` per 10 cm higher waist circumference, and `r or_text("Hypertension", "Waist-hip ratio")` per 0.1 higher waist-hip ratio.
+
+The strongest adjusted association was observed for diabetes with waist-hip ratio: `r or_text("Diabetes", "Waist-hip ratio")` per 0.1 higher waist-hip ratio. BMI and waist circumference were also strongly associated with diabetes, with ORs of `r or_text("Diabetes", "Body mass index")` and `r or_text("Diabetes", "Waist circumference")`, respectively. For cardiometabolic multimorbidity, waist-hip ratio again had the largest point estimate (`r or_text("Cardiometabolic multimorbidity", "Waist-hip ratio")`), followed by BMI (`r or_text("Cardiometabolic multimorbidity", "Body mass index")`) and waist circumference (`r or_text("Cardiometabolic multimorbidity", "Waist circumference")`).
+
+Associations with CKD were weaker. BMI (`r or_text("Chronic kidney disease", "Body mass index")`) and waist circumference (`r or_text("Chronic kidney disease", "Waist circumference")`) were positively associated with CKD, while waist-hip ratio was positive but imprecise and did not reach conventional statistical significance (`r or_text("Chronic kidney disease", "Waist-hip ratio")`). Anthropometric distributions by cardiometabolic multimorbidity status are shown in @fig-boxplots, and the relationship between BMI and waist circumference by multimorbidity status is shown in @fig-scatter.
+
+```{r}
+#| label: tbl-associations
+#| tbl-cap: "Survey-weighted adjusted associations between anthropometric measures and cardiometabolic outcomes."
+kable(table3_display)
+```
+
+In @tbl-associations, the Events column gives the unweighted number of participants with the outcome among the complete cases included in each model.
+
+```{r}
+#| label: fig-boxplots
+#| fig-cap: "Anthropometric distributions by cardiometabolic multimorbidity status."
+knitr::include_graphics("../figures/figure_7_anthropometry_by_multimorbidity_boxplots.png")
+```
+
+```{r}
+#| label: fig-scatter
+#| fig-cap: "BMI and waist circumference relationship by cardiometabolic multimorbidity status."
+knitr::include_graphics("../figures/figure_8_bmi_waist_scatter.png")
+```
+
+## Predictive Discrimination
+
+In anthropometric-only models, waist-hip ratio had the highest AUC for all four outcomes: hypertension (`r auc_text("Hypertension", "Waist-hip ratio", "Anthropometric only")`), diabetes (`r auc_text("Diabetes", "Waist-hip ratio", "Anthropometric only")`), CKD (`r auc_text("Chronic kidney disease", "Waist-hip ratio", "Anthropometric only")`), and cardiometabolic multimorbidity (`r auc_text("Cardiometabolic multimorbidity", "Waist-hip ratio", "Anthropometric only")`). Waist circumference consistently outperformed BMI in anthropometric-only models, with particularly clear separation for diabetes and multimorbidity. Predictive performance metrics are shown in @tbl-auc, and anthropometric-only ROC curves are shown in @fig-roc.
+
+After adjustment for demographic and socioeconomic covariates, AUCs were substantially higher and differences among anthropometric measures were smaller. BMI had the highest adjusted AUC for hypertension (`r auc_text("Hypertension", "Body mass index", "Adjusted demographic-clinical")`) and CKD (`r auc_text("Chronic kidney disease", "Body mass index", "Adjusted demographic-clinical")`), while waist circumference had the highest adjusted AUC for diabetes (`r auc_text("Diabetes", "Waist circumference", "Adjusted demographic-clinical")`) and cardiometabolic multimorbidity (`r auc_text("Cardiometabolic multimorbidity", "Waist circumference", "Adjusted demographic-clinical")`). These findings suggest that central adiposity measures improve unadjusted disease discrimination, but their incremental discrimination after basic demographic adjustment is modest and outcome-specific.
+
+```{r}
+#| label: tbl-auc
+#| tbl-cap: "Predictive performance comparison of BMI, waist circumference, and waist-hip ratio."
+kable(table4_display)
+```
+
+In @tbl-auc, AUC is the area under the receiver operating characteristic curve and summarizes discrimination: an AUC of 0.50 indicates no better discrimination than chance, whereas an AUC of 1.00 indicates perfect separation of participants with and without the outcome. AIC and BIC are model fit criteria that penalize model complexity; lower values indicate a better balance of fit and parsimony when comparing models fit to the same outcome and analytic sample.
+
+```{r}
+#| label: fig-roc
+#| fig-cap: "ROC curves for anthropometric-only models comparing BMI, waist circumference, and waist-hip ratio."
+knitr::include_graphics("../figures/figure_5_roc_curves.png")
+```
+
+## Missingness and Sensitivity Analyses
+
+Missingness varied across anthropometric, laboratory, and outcome variables, as shown in @tbl-missingness. Complete-case denominators are therefore reported for each model. Sensitivity analyses were conducted by sex, age group, and after excluding underweight participants; these analyses are provided in @tbl-sensitivity and were broadly intended to evaluate robustness rather than to replace the primary overall estimates.
+
+```{r}
+#| label: tbl-missingness
+#| tbl-cap: "Missingness among key analytic variables."
+kable(missingness_display)
+```
+
+# Discussion
+
+## Principal Findings
+
+In this contemporary NHANES analysis, BMI, waist circumference, and waist-hip ratio were each associated with prevalent hypertension, diabetes, CKD, and cardiometabolic multimorbidity, although the strength of association differed by outcome and measure. Central adiposity measures were especially informative in anthropometric-only prediction models. Waist-hip ratio had the highest AUC for all four outcomes before covariate adjustment, and it showed the largest adjusted odds ratios for diabetes and cardiometabolic multimorbidity. Waist circumference also performed well, particularly for adjusted discrimination of diabetes and multimorbidity.
+
+The findings support the central premise that BMI and central adiposity measures are not interchangeable. BMI and waist circumference were strongly correlated, indicating substantial overlap in what they measure. However, waist-hip ratio was less strongly correlated with BMI and more strongly differentiated adults with cardiometabolic disease in anthropometric-only models. This suggests that waist-hip ratio captures body shape and fat distribution information that is not fully represented by BMI.
+
+The CKD findings were more nuanced. BMI and waist circumference were positively associated with CKD after adjustment, but the waist-hip ratio association was less precise. CKD in cross-sectional NHANES data reflects a mixture of albuminuria and reduced eGFR, both of which may be influenced by age, diabetes, hypertension, muscle mass, and laboratory variability. The weaker CKD discrimination from anthropometry alone therefore should not be interpreted as evidence that adiposity is unimportant for kidney health; rather, it suggests that prevalent CKD classification is less directly captured by simple anthropometric measures than diabetes or multimorbidity.
+
+Predictive discrimination improved substantially after adjustment for age, sex, race and ethnicity, education, and poverty-income ratio. This is expected because age and demographic structure are powerful determinants of hypertension, diabetes, CKD, and multimorbidity. After adjustment, no single anthropometric measure uniformly dominated. This pattern is clinically important: central adiposity measures appear to add meaningful information, but the best measure may depend on the outcome and whether the goal is simple screening, risk communication, or multivariable prediction.
+
+## Comparison With Existing Literature
+
+These findings are broadly consistent with prior literature showing that abdominal adiposity measures are closely related to cardiometabolic risk and may outperform BMI for some outcomes. Earlier work has emphasized that waist circumference can explain obesity-related health risk beyond BMI and can be used to identify adults who may benefit from weight management interventions.[@lean1995; @janssen2004] A review by Huxley and colleagues similarly concluded that BMI, waist circumference, and waist-hip ratio have each been studied as cardiovascular risk predictors, while noting uncertainty about which anthropometric measure is best across outcomes and populations.[@huxley2010] Systematic review evidence has also suggested that simple central adiposity indices can perform at least as well as BMI for identifying cardiometabolic risk factors.[@ashwell2012]
+
+The present analysis extends this evidence by comparing BMI, waist circumference, and waist-hip ratio in a recent nationally representative US sample and by examining multiple cardiometabolic outcomes using both adjusted association models and discrimination analyses. The stronger anthropometric-only performance of waist-hip ratio is compatible with the biological expectation that abdominal fat distribution is particularly relevant to insulin resistance, vascular risk, and multimorbidity. At the same time, the attenuation of differences after demographic and socioeconomic adjustment highlights an important distinction: a measure may be useful as a simple stand-alone screening marker while adding only modest discrimination once age, sex, race and ethnicity, and socioeconomic position are already included in a model.
+
+The results also temper a simple conclusion that central adiposity measures should replace BMI. BMI remained positively associated with all outcomes and had the highest adjusted AUC for hypertension and CKD. This differs from interpretations that treat BMI mainly as an inferior surrogate for adiposity distribution. In these data, BMI retained clinically relevant information, probably because it captures overall body size and adiposity burden, is strongly correlated with waist circumference, and remains highly standardized in clinical and surveillance systems.
+
+## Policy and Clinical Implications
+
+The policy implication is not that BMI should be disregarded in favor of central adiposity measures, but that BMI should be interpreted alongside them. BMI remains inexpensive, reproducible, widely understood, and embedded in surveillance definitions, clinical workflows, and public health guidelines. Replacing it entirely would risk losing a common metric that still showed meaningful associations and discrimination in this analysis.
+
+However, reliance on BMI alone may miss risk heterogeneity related to body fat distribution. Waist circumference and waist-hip ratio are low-cost measurements that can be collected in routine clinical and community settings, and they provide complementary information about central adiposity. For cardiometabolic risk assessment, especially diabetes and multimorbidity screening, adding a central adiposity measure to BMI may improve risk communication and help identify adults whose cardiometabolic risk is higher than BMI category alone suggests.
+
+Public health guidance should therefore emphasize combined interpretation rather than competition among measures. BMI can continue to serve as a practical population-level and clinical entry point, while waist circumference or waist-hip ratio can refine assessment of central adiposity and cardiometabolic risk. This approach is more consistent with the present findings than a policy shift that either treats BMI as sufficient on its own or discards BMI because central adiposity measures appear more anatomically specific.
+
+## Implications for Further Research
+
+This study addresses the comparative cross-sectional performance of BMI, waist circumference, and waist-hip ratio for prevalent cardiometabolic disease in contemporary NHANES data, but it does not fully answer questions about causality, incident disease, or clinical decision thresholds. Longitudinal studies are needed to determine whether central adiposity measures predict new-onset hypertension, diabetes, CKD, and multimorbidity better than BMI, and whether combining measures improves calibration, reclassification, or clinical outcomes.
+
+Further research should also evaluate whether optimal anthropometric thresholds differ by age, sex, race and ethnicity, and body composition. Because this analysis found outcome-specific differences, future work should avoid assuming that a single anthropometric measure is best for all cardiometabolic endpoints. Studies that compare simple measurement strategies in primary care and community settings would be especially useful, including whether adding waist circumference or waist-hip ratio to BMI changes screening decisions, counseling, treatment initiation, or patient understanding of risk.
+
+## Strengths and Limitations
+
+Strengths of this study include use of a contemporary nationally representative NHANES cycle, standardized anthropometric measurements, objective laboratory data for diabetes and CKD definitions, prespecified disease outcomes, and primary analyses that accounted for complex survey design. The use of measured rather than self-reported anthropometry is important because self-reported BMI can bias associations between obesity and health conditions.[@chiolero2007] The analysis compared three clinically accessible anthropometric measures using interpretable increments and examined both associations and discrimination.
+
+Several limitations should be noted. First, the cross-sectional design precludes causal inference and does not establish temporal ordering between adiposity and disease. Second, some disease components relied partly on self-report and medication use, which may introduce misclassification. Third, CKD was defined from single-visit eGFR and albuminuria markers; therefore, persistence for at least 3 months could not be confirmed, and some participants may have had transient kidney function or albuminuria abnormalities. Fourth, outcome-specific complete-case analysis produced varying denominators, particularly for laboratory-dependent outcomes. Fifth, ROC/AUC analyses were conventional unweighted prediction analyses and should be interpreted as secondary; the primary inferential results are the survey-weighted regression models. Sixth, NHANES represents the US civilian non-institutionalized population, so statistical generalizability should not be extended to institutionalized populations or non-US populations.
+
+# Conclusions
+
+Among US adults in NHANES August 2021-August 2023, BMI, waist circumference, and waist-hip ratio were all associated with prevalent cardiometabolic disease. Central adiposity measures, especially waist-hip ratio, showed stronger anthropometric-only discrimination than BMI for hypertension, diabetes, CKD, and cardiometabolic multimorbidity. After demographic and socioeconomic adjustment, discrimination was high across models and differences among anthropometric measures were smaller. These results support routine consideration of central adiposity alongside BMI when assessing cardiometabolic risk.
+
+# Declarations
+
+## Ethics Approval and Consent to Participate
+
+NHANES protocols are reviewed and approved by the National Center for Health Statistics Research Ethics Review Board, and participants provide informed consent. This secondary analysis used de-identified public-use NHANES data and did not require additional participant contact.
+
+## Consent for Publication
+
+Not applicable. This manuscript does not contain identifiable individual participant data.
+
+## Availability of Data and Materials
+
+NHANES August 2021-August 2023 public-use data are publicly available from the National Center for Health Statistics.[@nchs2021protocol] The cleaned analytic dataset used here was derived from the preserved project master dataset and can be reproduced using the scripts in this repository.
+
+## Competing Interests
+
+The author declares no competing interests.
+
+## Funding
+
+No specific funding was received for this analysis.
+
+## Author Contributions
+
+H.M. conceived and designed the study, developed the research question, obtained and curated the NHANES data, prepared the analytic dataset, defined the study variables and outcomes, conducted the statistical analyses, generated the tables and figures, interpreted the findings, drafted the manuscript, critically revised the manuscript for important intellectual content, and approved the final version.
+
+## Acknowledgements
+
+The author acknowledges the National Center for Health Statistics, the NHANES study staff, and the survey participants whose publicly available data made this analysis possible.
+
+# Supplementary Material
+
+Variable definitions and outcome criteria are provided in @tbl-definitions.
+
+```{r}
+#| label: tbl-definitions
+#| tbl-cap: "Variable definitions and outcome criteria."
+kable(definitions_display)
+```
+
+Sensitivity analyses are provided in @tbl-sensitivity. These models repeat the adjusted anthropometric-outcome associations within sex strata, within age strata, and after excluding underweight participants.
+
+```{r}
+#| label: tbl-sensitivity
+#| tbl-cap: "Sensitivity analyses by sex strata, age strata, and exclusion of underweight participants."
+kable(sensitivity_display)
+```
+
+# References

@@ -1,0 +1,34 @@
+Rplots.pdf
+.Rhistory
+.RData
+.Rproj.user/
+
+# Project-local package library
+renv/library/
+
+# Large generated/intermediate data
+data/
+data/interim/
+data/raw/
+data/processed/
+data/processed/*.rds
+*.rds
+
+# Generated analysis outputs
+figures/
+tables/
+results/
+logs/
+
+# Render/cache artifacts
+manuscript/*_files/
+manuscript/.quarto/
+.quarto/
+outputs/
+*.html
+
+# Keep manuscript outputs reproducible through scripts
+outputs/logs/
+
+/.quarto/
+**/*.quarto_ipynb

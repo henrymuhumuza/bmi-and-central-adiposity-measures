@@ -1,0 +1,77 @@
+<?xml version="1.0" encoding="utf-8"?>
+<style xmlns="http://purl.org/net/xbiblio/csl" class="in-text" version="1.0" demote-non-dropping-particle="sort-only" default-locale="en-US">
+  <info>
+    <title>Vancouver</title>
+    <id>https://www.zotero.org/styles/vancouver</id>
+    <link href="https://www.zotero.org/styles/vancouver" rel="self"/>
+    <category citation-format="numeric"/>
+    <category field="medicine"/>
+    <updated>2026-06-30T00:00:00+00:00</updated>
+  </info>
+  <macro name="author">
+    <names variable="author">
+      <name initialize-with="" delimiter=", " name-as-sort-order="all" sort-separator=" "/>
+      <label form="short" prefix=", "/>
+      <substitute>
+        <names variable="editor"/>
+        <text variable="title"/>
+      </substitute>
+    </names>
+  </macro>
+  <macro name="title">
+    <text variable="title"/>
+  </macro>
+  <macro name="container">
+    <choose>
+      <if type="article-journal">
+        <text variable="container-title" form="short"/>
+      </if>
+      <else>
+        <text variable="container-title"/>
+      </else>
+    </choose>
+  </macro>
+  <macro name="issued">
+    <date variable="issued">
+      <date-part name="year"/>
+    </date>
+  </macro>
+  <citation collapse="citation-number">
+    <sort>
+      <key variable="citation-number"/>
+    </sort>
+    <layout delimiter=",">
+      <text variable="citation-number" vertical-align="sup"/>
+    </layout>
+  </citation>
+  <bibliography et-al-min="7" et-al-use-first="6" second-field-align="flush">
+    <layout suffix=".">
+      <text variable="citation-number" suffix=". "/>
+      <text macro="author" suffix=". "/>
+      <text macro="title" suffix=". "/>
+      <choose>
+        <if type="article-journal">
+          <text macro="container" suffix=". "/>
+          <text macro="issued" suffix=";"/>
+          <group delimiter=":">
+            <group delimiter=" ">
+              <text variable="volume"/>
+              <text variable="issue" prefix="(" suffix=")"/>
+            </group>
+            <text variable="page"/>
+          </group>
+        </if>
+        <else-if type="webpage post-weblog" match="any">
+          <text macro="container" suffix=". "/>
+          <text macro="issued" suffix=". "/>
+          <text variable="URL" prefix="Available from: "/>
+        </else-if>
+        <else>
+          <text macro="container" suffix=". "/>
+          <text macro="issued"/>
+        </else>
+      </choose>
+      <text variable="DOI" prefix=". doi:"/>
+    </layout>
+  </bibliography>
+</style>
