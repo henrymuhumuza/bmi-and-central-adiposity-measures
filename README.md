@@ -2,7 +2,7 @@
 
 Reproducible Quarto/R workflow for:
 
-**Central Obesity Versus Body Mass Index for Predicting Cardiometabolic Disease: A Cross-sectional Analysis of NHANES August 2021-August 2023**
+**Central Obesity Versus Body Mass Index for Identifying Cardiometabolic Disease: A Cross-sectional Analysis of NHANES August 2021-August 2023**
 
 The analysis compares body mass index, waist circumference, and waist-hip ratio for identifying hypertension, diabetes, chronic kidney disease, and cardiometabolic multimorbidity among US adults aged 20 years or older.
 
